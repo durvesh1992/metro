@@ -147,7 +147,9 @@ test('passes a working transitive-dependency lookup to getTransformOptions', asy
   );
   // foo depends on bar, baz, qux — the callback must return those, not [undefined].
   if (resolvedDeps == null) {
-    throw new Error('getTransformOptions was not called with a dependency lookup');
+    throw new Error(
+      'getTransformOptions was not called with a dependency lookup',
+    );
   }
   expect([...resolvedDeps].sort()).toEqual([
     '/root/bar.js',
