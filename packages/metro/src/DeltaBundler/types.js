@@ -17,6 +17,16 @@ import type {JsTransformOptions} from 'metro-transform-worker';
 
 import CountingSet from '../lib/CountingSet';
 
+// Valid inputs to JSON.stringify, as used to encode literals into transform
+// output.
+export type ReadonlyJsonData =
+  | null
+  | boolean
+  | number
+  | string
+  | ReadonlyArray<?ReadonlyJsonData>
+  | Readonly<{[string]: ?ReadonlyJsonData}>;
+
 export type MixedOutput = {
   readonly data: unknown,
   readonly type: string,
@@ -139,8 +149,7 @@ export type AllowOptionalDependenciesWithOptions = {
   readonly exclude: Array<string>,
 };
 export type AllowOptionalDependencies =
-  | boolean
-  | AllowOptionalDependenciesWithOptions;
+  boolean | AllowOptionalDependenciesWithOptions;
 
 export type BundlerResolution = Readonly<{
   type: 'sourceFile',
@@ -168,7 +177,8 @@ export type DeltaResult<T = MixedOutput> = {
 
 export type SerializerOptions = Readonly<{
   asyncRequireModulePath: string,
-  createModuleId: string => number,
+  createModuleId: (absolutePath: string) => number,
+  dependencyMapReservedName?: ?string,
   dev: boolean,
   getRunModuleStatement: (
     moduleId: number | string,
@@ -176,15 +186,20 @@ export type SerializerOptions = Readonly<{
   ) => string,
   globalPrefix: string,
   includeAsyncPaths: boolean,
-  inlineSourceMap: ?boolean,
+  inlineSourceMap?: ?boolean,
   modulesOnly: boolean,
   processModuleFilter: (module: Module<>) => boolean,
   projectRoot: string,
   runBeforeMainModule: ReadonlyArray<string>,
   runModule: boolean,
   serverRoot: string,
-  shouldAddToIgnoreList: (Module<>) => boolean,
-  sourceMapUrl: ?string,
-  sourceUrl: ?string,
-  getSourceUrl: ?(Module<>) => string,
+  shouldAddToIgnoreList: (module: Module<>) => boolean,
+  sourceMapUrl?: ?string,
+  sourceUrl?: ?string,
+  getSourceUrl?: ?(module: Module<>) => string,
+  unstable_inlineDependencyMap?: boolean,
+  unstable_getAsyncDependencyPath?: (
+    dependency: ResolvedDependency,
+    options: unknown,
+  ) => ?ReadonlyJsonData,
 }>;

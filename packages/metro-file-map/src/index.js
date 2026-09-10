@@ -22,6 +22,8 @@ import type {
   ChangeEventClock,
   ChangeEventMetadata,
   Console,
+  Crawler,
+  CrawlerFactory,
   CrawlerOptions,
   CrawlResult,
   FileData,
@@ -52,14 +54,14 @@ import normalizePathSeparatorsToSystem from './lib/normalizePathSeparatorsToSyst
 import {RootPathUtils} from './lib/RootPathUtils';
 import TreeFS from './lib/TreeFS';
 import {Watcher} from './Watcher';
-import EventEmitter from 'events';
-import {promises as fsPromises} from 'fs';
+import debugModule from 'debug';
 import invariant from 'invariant';
-import * as path from 'path';
-import {performance} from 'perf_hooks';
+import EventEmitter from 'node:events';
+import {promises as fsPromises} from 'node:fs';
+import * as path from 'node:path';
+import {performance} from 'node:perf_hooks';
 
-// eslint-disable-next-line import/no-commonjs
-const debug = require('debug')('Metro:FileMap');
+const debug = debugModule('Metro:FileMap');
 
 export type {
   BuildParameters,
@@ -86,6 +88,11 @@ export type InputOptions = Readonly<{
 
   cacheManagerFactory?: ?CacheManagerFactory,
   console?: Console,
+  /**
+   * Replaces the built-in Watchman/node crawlers. Watch mode, if enabled, still
+   * uses the built-in watcher backends.
+   */
+  crawlerFactory?: ?CrawlerFactory,
   healthCheck: HealthCheckOptions,
   maxFilesPerWorker?: ?number,
   maxWorkers: number,
@@ -133,6 +140,7 @@ type InternalEnqueuedEvent = Readonly<
 >;
 
 export {DiskCacheManager} from './cache/DiskCacheManager';
+export {NoopCacheManager} from './cache/NoopCacheManager';
 export {default as DependencyPlugin} from './plugins/DependencyPlugin';
 export type {DependencyPluginOptions} from './plugins/DependencyPlugin';
 export {DuplicateHasteCandidatesError} from './plugins/haste/DuplicateHasteCandidatesError';
@@ -147,6 +155,11 @@ export type {
   CacheManagerFactoryOptions,
   CacheManagerWriteOptions,
   ChangeEvent,
+  Crawler,
+  CrawlerFactory,
+  CrawlerFactoryOptions,
+  CrawlerOptions,
+  CrawlResult,
   DependencyExtractor,
   WatcherStatus,
 } from './flow-types';
@@ -258,6 +271,7 @@ export default class FileMap extends EventEmitter {
   #healthCheckInterval: ?IntervalID;
   readonly #options: InternalOptions;
   readonly #pathUtils: RootPathUtils;
+  readonly #crawler: ?Crawler;
   readonly #plugins: ReadonlyArray<IndexedPlugin>;
   readonly #startupPerfLogger: ?PerfLogger;
   #watcher: ?Watcher;
@@ -299,13 +313,23 @@ export default class FileMap extends EventEmitter {
 
     const indexedPlugins: Array<IndexedPlugin> = [];
     const pluginWorkers: Array<FileMapPluginWorker> = [];
+    const pluginDataIndices = new Map<string, number>();
     const plugins = options.plugins ?? [];
     for (const plugin of plugins) {
       const maybeWorker = plugin.getWorker();
-      indexedPlugins.push({
-        plugin,
-        dataIdx: maybeWorker != null ? dataSlot++ : null,
-      });
+      const dataIdx = maybeWorker != null ? dataSlot++ : null;
+      indexedPlugins.push({plugin, dataIdx});
+      if (dataIdx != null) {
+        // Crawlers address plugin data by name, so names must be unique among
+        // plugins holding a slot - otherwise a crawler would silently write to
+        // the shadowed plugin's slot.
+        invariant(
+          !pluginDataIndices.has(plugin.name),
+          'metro-file-map: Duplicate plugin name: %s',
+          plugin.name,
+        );
+        pluginDataIndices.set(plugin.name, dataIdx);
+      }
       if (maybeWorker != null) {
         pluginWorkers.push(maybeWorker);
       }
@@ -333,6 +357,10 @@ export default class FileMap extends EventEmitter {
       watch: !!options.watch,
       watchmanDeferStates: options.watchmanDeferStates ?? [],
     };
+
+    this.#crawler = options.crawlerFactory
+      ? options.crawlerFactory.call(null, {buildParameters, pluginDataIndices})
+      : null;
 
     const cacheFactoryOptions: CacheManagerFactoryOptions = {
       buildParameters,
@@ -525,6 +553,7 @@ export default class FileMap extends EventEmitter {
       abortSignal: this.#crawlerAbortController.signal,
       computeSha1,
       console: this.#console,
+      crawl: this.#crawler,
       enableSymlinks,
       extensions,
       healthCheckFilePrefix: this.#options.healthCheck.filePrefix,
@@ -540,7 +569,9 @@ export default class FileMap extends EventEmitter {
       previousState,
       rootDir,
       roots,
-      useWatchman: await this.#shouldUseWatchman(),
+      // A supplied crawler makes the Watchman capability probe - which spawns
+      // watchman - pointless.
+      useWatchman: this.#crawler == null && (await this.#shouldUseWatchman()),
       watch,
       watchmanDeferStates,
     });

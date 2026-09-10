@@ -13,15 +13,9 @@ A Metro config can be created in the following file formats (ordered by priority
 
 You can also give a custom file to the configuration by specifying `--config <path/to/config>` when calling the CLI.
 
-:::warning Deprecated
-
-YAML config files (`.yaml`, `.yml`) are **deprecated** and will be removed in a future version of Metro. Please migrate to a JavaScript, TypeScript, or JSON config file. When Metro loads a YAML config file, it will display a deprecation warning.
-
-:::
-
 :::info TypeScript Config Support
 
-TypeScript config files are supported in Node.js 24.0.0+ or Node.js 22.6.0+ with the `--experimental-strip-types` flag. If your Node.js version doesn't support loading TypeScript natively, you'll see an error with instructions when attempting to load a TypeScript config file.
+Metro uses Node.js native TypeScript support to load `.*ts` config files. For Node.js 22.18.0 and later or 24.0.0 later, _erasable_ TypeScript is supported out of the box. For Node.js < 22.18.0, use the `--experimental-strip-types` flag. See https://nodejs.org/learn/typescript/run-natively.
 
 :::
 
@@ -316,6 +310,44 @@ resolveRequest: (context, moduleName, platform) => {
 
 For more information on customizing the resolver, see [Module Resolution](https://metrobundler.dev/docs/resolution).
 
+#### `schemeResolvers`
+
+Type: `?{[scheme: string]: `[`CustomResolver`](./Resolution.md#resolverequest-customresolver)`}`
+
+An object of custom resolvers for import specifiers prefixed with a URI scheme, keyed by lowercase scheme name (the prefix before the first `:`, without the colon). When Metro's default resolution encounters a specifier whose scheme matches a registered key (for example `my-scheme:foo` matching `'my-scheme'`), the corresponding resolver is invoked with the full specifier.
+
+```javascript
+schemeResolvers: {
+  'my-scheme': (context, specifier, platform) => {
+    // `specifier` is the full 'my-scheme:...' string.
+    // Resolve it to a file, or delegate back to the default resolver via
+    // `context.resolveRequest(context, someOtherName, platform)`.
+    return {
+      type: 'sourceFile',
+      filePath: '/absolute/path/to/file.js',
+    };
+  },
+},
+```
+
+This differs from [`resolveRequest`](#resolverequest) in a few ways:
+
+- Scheme resolvers run *within* Metro's default resolution rather than replacing it. A user [`resolveRequest`](#resolverequest) still takes precedence, and can delegate back into default resolution (via `context.resolveRequest`), at which point scheme resolvers apply.
+- Only specifiers matching a registered scheme are dispatched. Relative (`./`, `../`) and subpath (`#…`) imports are resolved first and are never treated as schemes.
+- The resolver receives a `context` whose [`resolveRequest`](./Resolution.md#resolverequest-customresolver) delegates to Metro's default resolution, for easy chaining.
+
+The scheme parsed from a specifier is lowercased before lookup, so keys must be lowercase — both `Foo:` and `foo:` match the `'foo'` key. When multiple configs are combined with `mergeConfig`, `schemeResolvers` are merged per scheme, so a later config replaces an earlier resolver only when it reuses the same (lowercase) key.
+
+:::note Backwards compatibility
+
+`schemeResolvers` itself is not deprecated. However, when a specifier's scheme has *no* registered resolver, Metro currently falls back to its other resolution methods (Haste, `node_modules`, [`extraNodeModules`](#extranodemodules)) before failing, in case a project already uses scheme-like specifiers with those. This fallback is deprecated and will be removed in a later release, after which an unregistered scheme will fail immediately.
+
+:::
+
+Metro registers its own built-in scheme resolvers (currently `metro:`) when it builds a resolution context. Those are applied *beneath* this option, so an entry here overrides a built-in that uses the same scheme key.
+
+Defaults to `{}`.
+
 #### `useWatchman`
 
 Type: `boolean`
@@ -376,13 +408,15 @@ This setting will take effect when [`unstable_enablePackageExports`](#unstable_e
 
 The set of [condition names](https://nodejs.org/docs/latest-v18.x/api/packages.html#conditional-exports) to assert globally when interpreting the [`"exports"` field](https://nodejs.org/docs/latest-v18.x/api/packages.html#exports) in package.json.
 
-Conditions may be any string value and are resolved in the order specified by each package. Node.js documents a number of [community conditions](https://nodejs.org/docs/latest-v18.x/api/packages.html#community-conditions-definitions) which are commonly used by package authors. The `default` condition is always matched.
+Conditions may be any string value and are resolved in the order specified by each package. Node.js documents a number of [community conditions](https://nodejs.org/docs/latest-v18.x/api/packages.html#community-conditions-definitions) which are commonly used by package authors.
 
-Defaults to `['require']`.
+Metro always asserts `default`, plus `import` or `require` according to the syntax of each import - an `import` statement asserts `import`, a `require()` call asserts `require`. Neither needs to be listed here, and listing one would assert it for every import regardless of syntax.
+
+Defaults to `[]`.
 
 :::note
 
-When using React Native, `unstable_conditionNames` defaults to `['require', 'react-native']`.
+When using React Native, `unstable_conditionNames` defaults to `['react-native']`.
 
 :::
 
@@ -398,7 +432,7 @@ This setting will take effect when [`unstable_enablePackageExports`](#unstable_e
 
 The set of additional [condition names](https://nodejs.org/docs/latest-v18.x/api/packages.html#conditional-exports) to dynamically assert by platform (see [`platforms`](#platforms)) when interpreting the [`"exports"` field](https://nodejs.org/docs/latest-v18.x/api/packages.html#exports) in package.json.
 
-Matched conditions are merged with [`unstable_conditionNames`](#unstable-conditionnames) before resolution. With the defaults for both options, the conditions `new Set(['require', 'browser'])` will be asserted when requesting a `web` bundle, and `new Set(['require'])` otherwise. Again, these are resolved in the order specified by each package.
+Matched conditions are merged with [`unstable_conditionNames`](#unstable_conditionnames-experimental) before resolution. Under React Native's defaults for both options, a `require()` call site asserts `new Set(['default', 'require', 'react-native', 'browser'])` when requesting a `web` bundle, and `new Set(['default', 'require', 'react-native'])` otherwise. Again, these are resolved in the order specified by each package.
 
 Defaults to `‌{ web: ['browser'] }`.
 
@@ -575,7 +609,7 @@ This option only works under the default settings for React Native. It may have 
 
 Type: `boolean`
 
-Whether to use the [`hermes-parser`](https://www.npmjs.com/package/hermes-parser) package to parse JavaScript source files, instead of Babel. Defaults to `false`.
+Whether to use the [`flow-parser`](https://www.npmjs.com/package/flow-parser) package to parse JavaScript source files, instead of Babel. Defaults to `false`.
 
 :::note
 This option only has an effect under the default [`transformerPath`](#transformerpath) and the [Babel transformers](#babeltransformerpath) built into Metro. Custom transformers and custom [Babel transformers](#babeltransformerpath) may ignore it.

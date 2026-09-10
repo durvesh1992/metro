@@ -32,9 +32,7 @@ type SourceMapping = [number, number, number, number];
 type SourceMappingWithName = [number, number, number, number, string];
 
 export type MetroSourceMapSegmentTuple =
-  | SourceMappingWithName
-  | SourceMapping
-  | GeneratedCodeMapping;
+  SourceMappingWithName | SourceMapping | GeneratedCodeMapping;
 
 // A single segment of a standard "decoded" source map (as produced by
 // `@babel/generator`'s `result.decodedMap` / `@jridgewell/gen-mapping`),
@@ -59,7 +57,10 @@ export type VlqMap = {
   readonly names: ReadonlyArray<string>,
 };
 
-export type HermesFunctionOffsets = {[number]: ReadonlyArray<number>, ...};
+export type HermesFunctionOffsets = {
+  [functionId: number]: ReadonlyArray<number>,
+  ...
+};
 
 export type FBSourcesArray = ReadonlyArray<?FBSourceMetadata>;
 export type FBSourceMetadata = [?FBSourceFunctionMap];
@@ -615,24 +616,4 @@ export {
   tuplesFromBabelDecodedMap,
   vlqMapFromBabelDecodedMap,
   vlqMapFromTuples,
-};
-
-/**
- * Backwards-compatibility with CommonJS consumers using interopRequireDefault.
- * Do not add to this list.
- *
- * @deprecated Default import from 'metro-source-map' is deprecated, use named exports.
- */
-export default {
-  BundleBuilder,
-  composeSourceMaps,
-  Consumer,
-  createIndexMap,
-  generateFunctionMap,
-  fromRawMappings,
-  fromRawMappingsNonBlocking,
-  functionMapBabelPlugin,
-  normalizeSourcePath,
-  toBabelSegments,
-  toSegmentTuple,
 };

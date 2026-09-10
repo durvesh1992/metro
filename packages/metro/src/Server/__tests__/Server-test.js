@@ -30,7 +30,7 @@ import MockResponse from 'mock-res';
 const {
   getDefaultConfig: {getDefaultValues},
 } = require('metro-config');
-const path = require('path');
+const path = require('node:path');
 
 jest
   .mock('jest-worker', () => ({}))
@@ -78,8 +78,8 @@ describe('processRequest', () => {
     getAsset = jest.fn();
 
     let i = 0;
-    jest.doMock('crypto', () => ({
-      ...jest.requireActual('crypto'),
+    jest.doMock('node:crypto', () => ({
+      ...jest.requireActual('node:crypto'),
       randomBytes: jest.fn().mockImplementation(() => `XXXXX-${i++}`),
     }));
 
@@ -97,13 +97,16 @@ describe('processRequest', () => {
       getResolveDependencyFn,
     }));
 
+    const mockFs = new (require('metro-memory-fs'))();
+    jest.doMock('fs', () => mockFs);
+    jest.doMock('node:fs', () => mockFs);
+
     Bundler = require('../../Bundler').default;
     jest
       .spyOn(Bundler.prototype, 'getDependencyGraph')
       .mockImplementation(getDependencyGraph);
 
-    jest.mock('fs', () => new (require('metro-memory-fs'))());
-    fs = require('fs');
+    fs = mockFs;
 
     DeltaBundler = require('../../DeltaBundler').default;
     jest
@@ -312,6 +315,7 @@ describe('processRequest', () => {
         load: jest.fn(() => Promise.resolve()),
         getWatcher: jest.fn(() => ({})),
         doesFileExist: jest.fn().mockReturnValue(true),
+        getOrComputeSha1: jest.fn(() => Promise.resolve({sha1: 'abcdef'})),
       }),
     );
 
@@ -326,7 +330,9 @@ describe('processRequest', () => {
     );
 
     // $FlowFixMe[cannot-write]
-    fs.realpath = jest.fn((file, cb) => cb?.(null, '/root/foo.js'));
+    fs.realpath = jest.fn((file, cb) => {
+      cb?.(null, '/root/foo.js');
+    });
   });
 
   test.each(['?', '//&'])(
@@ -341,7 +347,7 @@ describe('processRequest', () => {
         [
           'function () {require();}',
           '__d(function() {entry();},0,[1],"mybundle.js");',
-          '__d(function() {foo();},1,[],"foo.js");',
+          '__d(function() {foo();},1,null,"foo.js");',
           'require(0);',
           '//# sourceMappingURL=http://localhost:8081/mybundle.map?runModule=true',
           '//# sourceURL=http://localhost:8081/mybundle.bundle//&runModule=true',
@@ -357,7 +363,7 @@ describe('processRequest', () => {
       [
         'function () {require();}',
         '__d(function() {entry();},0,[1],"mybundle.js");',
-        '__d(function() {foo();},1,[],"foo.js");',
+        '__d(function() {foo();},1,null,"foo.js");',
         '//# sourceMappingURL=http://localhost:8081/mybundle.map?runModule=false',
         '//# sourceURL=http://localhost:8081/mybundle.bundle//&runModule=false',
       ].join('\n'),
@@ -467,7 +473,7 @@ describe('processRequest', () => {
     expect(response._getString()).toEqual(
       [
         '__d(function() {entry();},0,[1],"mybundle.js");',
-        '__d(function() {foo();},1,[],"foo.js");',
+        '__d(function() {foo();},1,null,"foo.js");',
         '//# sourceMappingURL=http://localhost:8081/mybundle.map?modulesOnly=true&runModule=false',
         '//# sourceURL=http://localhost:8081/mybundle.bundle//&modulesOnly=true&runModule=false',
       ].join('\n'),
@@ -488,7 +494,7 @@ describe('processRequest', () => {
     expect(response._getString()).toEqual(
       [
         '__d(function() {entry();},0,[1],"mybundle.js");',
-        '__d(function() {foo();},1,[],"foo.js");',
+        '__d(function() {foo();},1,null,"foo.js");',
         '//# sourceMappingURL=https://forwardedhost.com/mybundle.map?modulesOnly=true&runModule=false&platform=vr',
         '//# sourceURL=https://forwardedhost.com/mybundle.bundle//&modulesOnly=true&runModule=false&platform=vr',
       ].join('\n'),
@@ -594,21 +600,40 @@ describe('processRequest', () => {
 
     expect(response._getJSON()).toEqual({
       version: 3,
-      sources: ['require-js', '/root/mybundle.js', '/root/foo.js'],
-      sourcesContent: ['code-require', 'code-mybundle', 'code-foo'],
-      names: [],
-      mappings: ';gBCAA;gBCAA',
-      x_facebook_sources: [
-        null,
-        null,
-        [
-          {
-            mappings: 'AAA',
-            names: ['<global>'],
+      sections: [
+        {
+          offset: {line: 0, column: 0},
+          map: {
+            version: 3,
+            sources: ['require-js'],
+            sourcesContent: ['code-require'],
+            names: [],
+            mappings: '',
           },
-        ],
+        },
+        {
+          offset: {line: 1, column: 0},
+          map: {
+            version: 3,
+            sources: ['/root/mybundle.js'],
+            sourcesContent: ['code-mybundle'],
+            names: [],
+            mappings: 'gBAAA',
+          },
+        },
+        {
+          offset: {line: 2, column: 0},
+          map: {
+            version: 3,
+            sources: ['/root/foo.js'],
+            sourcesContent: ['code-foo'],
+            names: [],
+            mappings: 'gBAAA',
+            x_facebook_sources: [[{mappings: 'AAA', names: ['<global>']}]],
+            x_google_ignoreList: [0],
+          },
+        },
       ],
-      x_google_ignoreList: [2],
     });
   });
 
@@ -617,20 +642,30 @@ describe('processRequest', () => {
 
     expect(response._getJSON()).toEqual({
       version: 3,
-      sources: ['/root/mybundle.js', '/root/foo.js'],
-      sourcesContent: ['code-mybundle', 'code-foo'],
-      names: [],
-      mappings: 'gBAAA;gBCAA',
-      x_facebook_sources: [
-        null,
-        [
-          {
-            mappings: 'AAA',
-            names: ['<global>'],
+      sections: [
+        {
+          offset: {line: 0, column: 0},
+          map: {
+            version: 3,
+            sources: ['/root/mybundle.js'],
+            sourcesContent: ['code-mybundle'],
+            names: [],
+            mappings: 'gBAAA',
           },
-        ],
+        },
+        {
+          offset: {line: 1, column: 0},
+          map: {
+            version: 3,
+            sources: ['/root/foo.js'],
+            sourcesContent: ['code-foo'],
+            names: [],
+            mappings: 'gBAAA',
+            x_facebook_sources: [[{mappings: 'AAA', names: ['<global>']}]],
+            x_google_ignoreList: [0],
+          },
+        },
       ],
-      x_google_ignoreList: [1],
     });
   });
 
@@ -718,25 +753,40 @@ describe('processRequest', () => {
 
     expect(response._getJSON()).toEqual({
       version: 3,
-      sources: [
-        '/require-js',
-        '/[metro-project]/mybundle.js',
-        '/[metro-project]/foo.js',
-      ],
-      sourcesContent: ['code-require', 'code-mybundle', 'code-foo'],
-      names: [],
-      mappings: ';gBCAA;gBCAA',
-      x_facebook_sources: [
-        null,
-        null,
-        [
-          {
-            mappings: 'AAA',
-            names: ['<global>'],
+      sections: [
+        {
+          offset: {line: 0, column: 0},
+          map: {
+            version: 3,
+            sources: ['/require-js'],
+            sourcesContent: ['code-require'],
+            names: [],
+            mappings: '',
           },
-        ],
+        },
+        {
+          offset: {line: 1, column: 0},
+          map: {
+            version: 3,
+            sources: ['/[metro-project]/mybundle.js'],
+            sourcesContent: ['code-mybundle'],
+            names: [],
+            mappings: 'gBAAA',
+          },
+        },
+        {
+          offset: {line: 2, column: 0},
+          map: {
+            version: 3,
+            sources: ['/[metro-project]/foo.js'],
+            sourcesContent: ['code-foo'],
+            names: [],
+            mappings: 'gBAAA',
+            x_facebook_sources: [[{mappings: 'AAA', names: ['<global>']}]],
+            x_google_ignoreList: [0],
+          },
+        },
       ],
-      x_google_ignoreList: [2],
     });
   });
 
@@ -793,7 +843,7 @@ describe('processRequest', () => {
         [
           'function () {require();}',
           '__d(function() {entry();},0,[1],"mybundle.js");',
-          '__d(function() {foo();},1,[],"foo.js");',
+          '__d(function() {foo();},1,null,"foo.js");',
           'require(0);',
           '//# sourceMappingURL=http://localhost:8081/mybundle.map?runModule=true&TEST_URL_WAS_REWRITTEN=true',
           '//# sourceURL=http://localhost:8081/mybundle.bundle//&runModule=true&TEST_URL_WAS_REWRITTEN=true',
@@ -901,6 +951,17 @@ describe('processRequest', () => {
       );
     });
 
+    test('should return a charset in the content-type header for a text asset', async () => {
+      const mockData = 'ｉ ａｍ ｈｔｍｌ';
+      getAsset.mockResolvedValue(mockData);
+
+      const response = await makeRequest('/assets/docs/a.html?platform=ios');
+
+      expect(response.getHeader('content-type')).toBe(
+        'text/html; charset=utf-8',
+      );
+    });
+
     test("should serve assets files's name contain non-latin letter", async () => {
       getAsset.mockResolvedValue('i am image');
 
@@ -961,6 +1022,29 @@ describe('processRequest', () => {
         expect.any(Function),
       );
       expect(response._getString()).toBe('i am image');
+    });
+  });
+
+  describe('source requests', () => {
+    beforeEach(() => {
+      fs.mkdirSync('/root');
+      fs.writeFileSync('/root/foo.js', '// \u3053\u3093\u306b\u3061\u306f\n');
+      fs.writeFileSync('/root/logo.png', 'not really a png');
+    });
+
+    test('serves a source file with a utf-8 charset', async () => {
+      const response = await makeRequest('/[metro-project]/foo.js');
+
+      expect(response.getHeader('content-type')).toBe(
+        'text/javascript; charset=utf-8',
+      );
+      expect(response._getString()).toBe('// \u3053\u3093\u306b\u3061\u306f\n');
+    });
+
+    test('does not add a charset to a binary file', async () => {
+      const response = await makeRequest('/[metro-project]/logo.png');
+
+      expect(response.getHeader('content-type')).toBe('image/png');
     });
   });
 

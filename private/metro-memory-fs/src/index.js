@@ -14,9 +14,9 @@
 /* eslint-disable no-bitwise */
 
 // $FlowFixMe[cannot-resolve-module]: not defined by Flow
-const constants = require('constants');
-const {EventEmitter} = require('events');
-const stream = require('stream');
+const constants = require('node:constants');
+const {EventEmitter} = require('node:events');
+const stream = require('node:stream');
 
 type NodeBase = {
   gid: number,
@@ -334,35 +334,29 @@ class MemoryFs {
     }
     const filePathStr = pathStr(filePath);
     if ((mode & constants.R_OK) !== 0) {
-      if (
-        !(
-          (stats.mode & constants.S_IROTH) !== 0 ||
-          ((stats.mode & constants.S_IRGRP) !== 0 && stats.gid === getgid()) ||
-          ((stats.mode & constants.S_IRUSR) !== 0 && stats.uid === getuid())
-        )
-      ) {
+      if (!(
+        (stats.mode & constants.S_IROTH) !== 0 ||
+        ((stats.mode & constants.S_IRGRP) !== 0 && stats.gid === getgid()) ||
+        ((stats.mode & constants.S_IRUSR) !== 0 && stats.uid === getuid())
+      )) {
         throw makeError('EPERM', filePathStr, 'file cannot be read');
       }
     }
     if ((mode & constants.W_OK) !== 0) {
-      if (
-        !(
-          (stats.mode & constants.S_IWOTH) !== 0 ||
-          ((stats.mode & constants.S_IWGRP) !== 0 && stats.gid === getgid()) ||
-          ((stats.mode & constants.S_IWUSR) !== 0 && stats.uid === getuid())
-        )
-      ) {
+      if (!(
+        (stats.mode & constants.S_IWOTH) !== 0 ||
+        ((stats.mode & constants.S_IWGRP) !== 0 && stats.gid === getgid()) ||
+        ((stats.mode & constants.S_IWUSR) !== 0 && stats.uid === getuid())
+      )) {
         throw makeError('EPERM', filePathStr, 'file cannot be written to');
       }
     }
     if ((mode & constants.X_OK) !== 0) {
-      if (
-        !(
-          (stats.mode & constants.S_IXOTH) !== 0 ||
-          ((stats.mode & constants.S_IXGRP) !== 0 && stats.gid === getgid()) ||
-          ((stats.mode & constants.S_IXUSR) !== 0 && stats.uid === getuid())
-        )
-      ) {
+      if (!(
+        (stats.mode & constants.S_IXOTH) !== 0 ||
+        ((stats.mode & constants.S_IXGRP) !== 0 && stats.gid === getgid()) ||
+        ((stats.mode & constants.S_IXUSR) !== 0 && stats.uid === getuid())
+      )) {
         throw makeError('EPERM', filePathStr, 'file cannot be executed');
       }
     }
