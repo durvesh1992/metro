@@ -33,7 +33,6 @@ import type {
   SplitBundleOptions,
 } from './shared/types';
 import type {IncomingMessage} from 'connect';
-import type {ServerResponse} from 'http';
 import type {CacheStore} from 'metro-cache';
 import type {ConfigT, RootPerfLogger} from 'metro-config';
 import type {
@@ -42,6 +41,7 @@ import type {
 } from 'metro-core/private/Logger';
 import type {CustomResolverOptions} from 'metro-resolver/private/types';
 import type {CustomTransformOptions} from 'metro-transform-worker';
+import type {ServerResponse} from 'node:http';
 
 import {getAsset} from './Assets';
 import baseJSBundle from './DeltaBundler/Serializers/baseJSBundle';
@@ -66,17 +66,17 @@ import MultipartResponse from './Server/MultipartResponse';
 import symbolicate from './Server/symbolicate';
 import {SourcePathsMode} from './shared/types';
 import {codeFrameColumns} from '@babel/code-frame';
+import debugModule from 'debug';
 import * as fs from 'graceful-fs';
 import * as jscSafeUrl from 'jsc-safe-url';
 import {Logger} from 'metro-core';
 import mime from 'mime-types';
+import path from 'node:path';
+import {performance} from 'node:perf_hooks';
+import querystring from 'node:querystring';
 import nullthrows from 'nullthrows';
-import path from 'path';
-import {performance} from 'perf_hooks';
-import querystring from 'querystring';
 
-// eslint-disable-next-line import/no-commonjs
-const debug = require('debug')('Metro:Server');
+const debug = debugModule('Metro:Server');
 
 const {createActionStartEntry, createActionEndEntry, log} = Logger;
 
@@ -266,6 +266,10 @@ export default class Server {
         this._shouldAddModuleToIgnoreList(module),
       getSourceUrl: (module: Module<>) =>
         this._getModuleSourceUrl(module, serializerOptions.sourcePaths),
+      dependencyMapReservedName:
+        this._config.transformer.unstable_dependencyMapReservedName,
+      unstable_inlineDependencyMap:
+        this._config.serializer.unstable_inlineDependencyMap,
     };
     let bundleCode = null;
     let bundleMap = null;
@@ -296,7 +300,6 @@ export default class Server {
           shouldAddToIgnoreList: bundleOptions.shouldAddToIgnoreList,
           getSourceUrl: (module: Module<>) =>
             this._getModuleSourceUrl(module, serializerOptions.sourcePaths),
-          allowIndexMap: this._config.serializer.unstable_allowIndexMap,
         },
       );
     }
@@ -308,7 +311,7 @@ export default class Server {
 
   async build(
     bundleOptions: BundleOptions,
-    {withAssets}: BuildOptions = {},
+    buildOptions: BuildOptions = {},
   ): Promise<{
     code: string,
     map: string,
@@ -316,6 +319,7 @@ export default class Server {
     ...
   }> {
     const splitOptions = splitBundleOptions(bundleOptions);
+    const {withAssets} = buildOptions;
     const {
       entryFile,
       graphOptions,
@@ -413,6 +417,10 @@ export default class Server {
         this._shouldAddModuleToIgnoreList(module),
       getSourceUrl: (module: Module<>) =>
         this._getModuleSourceUrl(module, serializerOptions.sourcePaths),
+      dependencyMapReservedName:
+        this._config.transformer.unstable_dependencyMapReservedName,
+      unstable_inlineDependencyMap:
+        this._config.serializer.unstable_inlineDependencyMap,
     });
   }
 
@@ -579,7 +587,7 @@ export default class Server {
       if (process.env.REACT_NATIVE_ENABLE_ASSET_CACHING === true) {
         res.setHeader('Cache-Control', 'max-age=31536000');
       }
-      res.setHeader('Content-Type', mime.lookup(path.basename(assetPath)));
+      res.setHeader('Content-Type', mime.contentType(path.basename(assetPath)));
       res.end(this._rangeRequestMiddleware(req, res, data, assetPath));
       process.nextTick(() => {
         log(createActionEndEntry(processingAssetRequestLogEntry));
@@ -592,9 +600,9 @@ export default class Server {
   }
 
   processRequest: (
-    IncomingMessage,
-    ServerResponse,
-    ((e: ?Error) => void),
+    req: IncomingMessage,
+    res: ServerResponse,
+    next: (e: ?Error) => void,
   ) => void = (
     req: IncomingMessage,
     res: ServerResponse,
@@ -746,7 +754,7 @@ export default class Server {
       res.end();
       return;
     }
-    const mimeType = mime.lookup(path.basename(relativeFilePathname));
+    const mimeType = mime.contentType(path.basename(relativeFilePathname));
     res.setHeader('Content-Type', mimeType);
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
@@ -788,6 +796,8 @@ export default class Server {
       bundlePerfLogger: RootPerfLogger,
     }>,
   ) => Promise<void> {
+    /* $FlowFixMe[incompatible-type] Error exposed after fixing this typing
+     * unsoundness in flow */
     return async function requestProcessor(
       this: Server,
       req: IncomingMessage,
@@ -1159,6 +1169,10 @@ export default class Server {
             this._shouldAddModuleToIgnoreList(module),
           getSourceUrl: (module: Module<>) =>
             this._getModuleSourceUrl(module, serializerOptions.sourcePaths),
+          dependencyMapReservedName:
+            this._config.transformer.unstable_dependencyMapReservedName,
+          unstable_inlineDependencyMap:
+            this._config.serializer.unstable_inlineDependencyMap,
         },
       );
       bundlePerfLogger.point('serializingBundle_end');
@@ -1310,7 +1324,6 @@ export default class Server {
             this._shouldAddModuleToIgnoreList(module),
           getSourceUrl: (module: Module<>) =>
             this._getModuleSourceUrl(module, serializerOptions.sourcePaths),
-          allowIndexMap: this._config.serializer.unstable_allowIndexMap,
         },
       );
     },

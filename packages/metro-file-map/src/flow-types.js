@@ -66,7 +66,7 @@ export interface CacheManager {
 }
 
 export interface CacheManagerEventSource {
-  onChange(listener: () => void): () => void /* unsubscribe */;
+  onChange(listener: () => void): () => void; /* unsubscribe */
 }
 
 export type CacheManagerFactory = (
@@ -95,7 +95,7 @@ export type ChangedFileMetadata = Readonly<{
 }>;
 
 export type ChangeEvent = Readonly<{
-  logger: ?RootPerfLogger,
+  logger?: ?RootPerfLogger,
   changes: ReadonlyFileSystemChanges<Readonly<ChangedFileMetadata>>,
   rootDir: string,
 }>;
@@ -109,7 +109,7 @@ export type ChangeEventMetadata = {
 export type Console = typeof global.console;
 
 export type CrawlerOptions = {
-  abortSignal: ?AbortSignal,
+  abortSignal?: ?AbortSignal,
   computeSha1: boolean,
   console: Console,
   extensions: ReadonlyArray<string>,
@@ -139,6 +139,37 @@ export type CrawlResult =
       removedFiles: Set<Path>,
     };
 
+/**
+ * Discovers files under `roots`, as a delta against `previousState`. This is
+ * the contract implemented by the built-in Watchman and node crawlers, and by
+ * any crawler supplied to `Watcher`.
+ */
+export type Crawler = (options: CrawlerOptions) => Promise<CrawlResult>;
+
+export type CrawlerFactoryOptions = Readonly<{
+  buildParameters: BuildParameters,
+
+  /**
+   * Maps a plugin's `name` to the index within `FileMetadata` reserved for its
+   * per-file data. Plugins that declare no worker have no reserved slot and are
+   * absent from this map.
+   *
+   * A crawler that can supply plugin data itself - rather than leaving it to
+   * the plugin's worker - writes it at these indices.
+   */
+  pluginDataIndices: ReadonlyMap<string, number>,
+}>;
+
+/**
+ * Replaces the built-in Watchman/node crawlers. Called once per `FileMap`,
+ * before the first crawl, with context that is fixed for that `FileMap`'s
+ * lifetime; the returned `Crawler` is called for the initial crawl and for any
+ * subsequent re-crawl.
+ *
+ * Only crawling is replaced. Watch mode, if enabled, still uses the built-in
+ * watcher backends.
+ */
+export type CrawlerFactory = (options: CrawlerFactoryOptions) => Crawler;
 export type DependencyExtractor = {
   extract: (
     content: string,
@@ -201,15 +232,15 @@ export type FileMapPluginWorker = Readonly<{
   filter: ({normalPath: string, isNodeModules: boolean}) => boolean,
 }>;
 
-export type V8Serializable =
-  | string
-  | number
-  | boolean
-  | null
+type V8SerializablePrimitive = string | number | boolean | null;
+
+type V8SerializableCollection =
   | ReadonlyArray<V8Serializable>
   | ReadonlySet<V8Serializable>
   | ReadonlyMap<string, V8Serializable>
   | Readonly<{[key: string]: V8Serializable}>;
+
+export type V8Serializable = V8SerializablePrimitive | V8SerializableCollection;
 
 export interface FileMapPlugin<
   in SerializableState extends void | V8Serializable = void | V8Serializable,
@@ -326,8 +357,8 @@ export interface FileSystem {
     mixedStartPath: string,
     subpath: string,
     opts: {
-      breakOnSegment: ?string,
-      invalidatedBy: ?Set<string>,
+      breakOnSegment?: ?string,
+      invalidatedBy?: ?Set<string>,
       subpathType: 'f' | 'd',
     },
   ): ?{
@@ -550,8 +581,7 @@ export type WatcherBackendOptions = Readonly<{
 }>;
 
 export type WatchmanClockSpec =
-  | string
-  | Readonly<{scm: Readonly<{'mergebase-with': string}>}>;
+  string | Readonly<{scm: Readonly<{'mergebase-with': string}>}>;
 export type WatchmanClocks = Map<Path, WatchmanClockSpec>;
 
 export type WorkerMessage = Readonly<{

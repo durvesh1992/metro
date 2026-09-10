@@ -13,12 +13,12 @@ import type {DeltaResult, Options} from './types';
 import type {ChangeEvent} from 'metro-file-map';
 
 import {Graph} from './Graph';
-import crypto from 'crypto';
-import EventEmitter from 'events';
-import path from 'path';
+import debugModule from 'debug';
+import crypto from 'node:crypto';
+import EventEmitter from 'node:events';
+import path from 'node:path';
 
-// eslint-disable-next-line import/no-commonjs
-const debug = require('debug')('Metro:DeltaCalculator');
+const debug = debugModule('Metro:DeltaCalculator');
 
 /**
  * Assigns a unique, stable `changeId` to each `ChangeEvent` from the file
