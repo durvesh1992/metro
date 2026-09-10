@@ -113,7 +113,7 @@ test('should return the RAM bundle info', async () => {
 });
 
 test('passes a working transitive-dependency lookup to getTransformOptions', async () => {
-  let resolvedDeps;
+  let resolvedDeps: ?Array<string>;
   await getRamBundleInfo(
     '/root/entry.js',
     pre,
@@ -146,6 +146,9 @@ test('passes a working transitive-dependency lookup to getTransformOptions', asy
     },
   );
   // foo depends on bar, baz, qux — the callback must return those, not [undefined].
+  if (resolvedDeps == null) {
+    throw new Error('getTransformOptions was not called with a dependency lookup');
+  }
   expect([...resolvedDeps].sort()).toEqual([
     '/root/bar.js',
     '/root/baz.js',
