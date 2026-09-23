@@ -32,7 +32,7 @@ import {chainComparators, compareStrings} from '../lib/sorting';
 import {DuplicateHasteCandidatesError} from './haste/DuplicateHasteCandidatesError';
 import getPlatformExtension from './haste/getPlatformExtension';
 import {HasteConflictsError} from './haste/HasteConflictsError';
-import path from 'path';
+import path from 'node:path';
 
 const EMPTY_OBJ: Readonly<{[string]: HasteMapItemMetadata}> = {};
 const EMPTY_MAP: ReadonlyMap<string, DuplicatesSet> = new Map();
@@ -80,10 +80,11 @@ export default class HastePlugin
     this.#failValidationOnConflicts = options.failValidationOnConflicts;
   }
 
-  async initialize({
-    files,
-  }: FileMapPluginInitOptions<null, string | null>): Promise<void> {
+  async initialize(
+    opts: FileMapPluginInitOptions<null, string | null>,
+  ): Promise<void> {
     this.#perfLogger?.point('constructHasteMap_start');
+    const files = opts.files;
     let hasteFiles = 0;
     for (const {
       baseName,

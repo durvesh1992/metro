@@ -102,18 +102,18 @@ export type PerfLoggerFactory = (
 type ResolverConfigT = {
   assetExts: ReadonlyArray<string>,
   assetResolutions: ReadonlyArray<string>,
-  blacklistRE?: RegExp | Array<RegExp>,
   blockList: RegExp | Array<RegExp>,
   disableHierarchicalLookup: boolean,
   dependencyExtractor: ?string,
   emptyModulePath: string,
   enableGlobalPackages: boolean,
-  extraNodeModules: {[name: string]: string, ...},
+  extraNodeModules: {[packageName: string]: string, ...},
   hasteImplModulePath: ?string,
   nodeModulesPaths: ReadonlyArray<string>,
   platforms: ReadonlyArray<string>,
   resolveRequest: ?CustomResolver,
   resolverMainFields: ReadonlyArray<string>,
+  schemeResolvers: Readonly<{[scheme: string]: CustomResolver}>,
   sourceExts: ReadonlyArray<string>,
   unstable_conditionNames: ReadonlyArray<string>,
   unstable_conditionsByPlatform: Readonly<{
@@ -139,7 +139,7 @@ type SerializerConfigT = {
     delta: DeltaResult<>,
   ) => unknown,
   getModulesRunBeforeMainModule: (entryFilePath: string) => Array<string>,
-  getPolyfills: ({platform: ?string, ...}) => ReadonlyArray<string>,
+  getPolyfills: (ctx: {platform: ?string, ...}) => ReadonlyArray<string>,
   getRunModuleStatement: (
     moduleId: number | string,
     globalPrefix: string,
@@ -147,13 +147,13 @@ type SerializerConfigT = {
   polyfillModuleNames: ReadonlyArray<string>,
   processModuleFilter: (modules: Module<>) => boolean,
   isThirdPartyModule: (module: Readonly<{path: string, ...}>) => boolean,
-  // When source maps are stored compactly as VLQ (see
-  // `transformer.unstable_compactSourceMaps`), allow the whole-bundle map to be
-  // emitted as an index map (sectioned) that passes the VLQ through verbatim,
-  // instead of decoding + re-encoding into a flat map. Cheaper to serialize, but
-  // requires consumers that understand index source maps. No-op unless compact
-  // VLQ maps are actually present, and ignored when a `customSerializer` is set.
-  unstable_allowIndexMap: boolean,
+  unstable_inlineDependencyMap: boolean,
+  // When true, the default bundle serializer emits modules inside a single
+  // segment definer (`__registerSegment(0, function (moduleId) { switch ... })`)
+  // so each `__d(...)` runs lazily on first require instead of eagerly at
+  // startup. Reduces startup registration cost and peak heap for large graphs.
+  // Experimental; source maps are supported. Does not affect delta/HMR.
+  unstable_lazilyDefineModules: boolean,
 };
 
 type TransformerConfigT = {
@@ -185,10 +185,13 @@ type CacheStoresConfigT = ReadonlyArray<CacheStore<TransformResult<>>>;
 
 type ServerConfigT = {
   /** @deprecated */
-  enhanceMiddleware: (Middleware, MetroServer) => Middleware | Server,
+  enhanceMiddleware: (
+    middleware: Middleware,
+    server: MetroServer,
+  ) => Middleware | Server,
   forwardClientLogs: boolean,
   port: number,
-  rewriteRequestUrl: string => string,
+  rewriteRequestUrl: (url: string) => string,
   unstable_serverRoot: ?string,
   useGlobalHotkey: boolean,
   verifyConnections: boolean,
@@ -203,18 +206,17 @@ type ServerConfigT = {
 };
 
 type SymbolicatorConfigT = {
-  customizeFrame: ({
+  customizeFrame: (frame: {
     readonly file: ?string,
     readonly lineNumber: ?number,
     readonly column: ?number,
     readonly methodName: ?string,
     ...
   }) =>
-    | ?{readonly collapse?: boolean}
-    | Promise<?{readonly collapse?: boolean}>,
+    ?{readonly collapse?: boolean} | Promise<?{readonly collapse?: boolean}>,
   customizeStack: (
-    Array<IntermediateStackFrame>,
-    unknown,
+    symbolicatedStack: Array<IntermediateStackFrame>,
+    extraData: unknown,
   ) => Array<IntermediateStackFrame> | Promise<Array<IntermediateStackFrame>>,
 };
 
@@ -239,7 +241,8 @@ type WatcherConfigT = {
 export type InputConfigT = Partial<
   Readonly<
     MetalConfigT & {
-      cacheStores: CacheStoresConfigT | (MetroCache => CacheStoresConfigT),
+      cacheStores:
+        CacheStoresConfigT | ((metroCache: MetroCache) => CacheStoresConfigT),
       resolver: Readonly<Partial<ResolverConfigT>>,
       server: Readonly<Partial<ServerConfigT>>,
       serializer: Readonly<Partial<SerializerConfigT>>,

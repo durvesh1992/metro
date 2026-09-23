@@ -13,13 +13,13 @@ import type {ConfigT, InputConfigT, YargArguments} from './types';
 
 import getDefaultConfig from './defaults';
 import validConfig from './defaults/validConfig';
-import * as fs from 'fs';
 import {validate} from 'jest-validate';
 import * as MetroCache from 'metro-cache';
-import {homedir} from 'os';
-import * as path from 'path';
+import * as fs from 'node:fs';
+import {homedir} from 'node:os';
+import * as path from 'node:path';
 // eslint-disable-next-line no-restricted-imports
-import {pathToFileURL} from 'url';
+import {pathToFileURL} from 'node:url';
 
 type ResolveConfigResult = {
   filepath: string,
@@ -126,6 +126,11 @@ function mergeConfigObjects<T extends InputConfigT>(
       ...(overrides.resolver?.hasteImplModulePath != null
         ? {hasteImplModulePath: resolve(overrides.resolver.hasteImplModulePath)}
         : null),
+      schemeResolvers: {
+        // $FlowFixMe[exponential-spread]
+        ...base.resolver?.schemeResolvers,
+        ...overrides.resolver?.schemeResolvers,
+      },
     },
     serializer: {
       ...base.serializer,
@@ -239,7 +244,12 @@ function mergeConfig<
       typeof next === 'function' ? next(currentConfig) : next;
     if (nextConfig instanceof Promise) {
       // $FlowFixMe[incompatible-type] Not clear why Flow doesn't like this
-      return mergeConfigAsync(nextConfig, reversedConfigs.toReversed());
+      return mergeConfigAsync(
+        nextConfig.then(resolved =>
+          mergeConfigObjects(currentConfig, resolved),
+        ),
+        ...reversedConfigs.toReversed(),
+      );
     }
     currentConfig = mergeConfigObjects(currentConfig, nextConfig) as T;
   }
@@ -369,11 +379,7 @@ async function loadConfig(
   validate(configuration, {
     exampleConfig: await validConfig(),
     recursiveDenylist: ['reporter', 'resolver', 'transformer'],
-    deprecatedConfig: {
-      blacklistRE: () =>
-        `Warning: Metro config option \`blacklistRE\` is deprecated.
-         Please use \`blockList\` instead.`,
-    },
+    deprecatedConfig: {},
   });
 
   // Override the configuration with cli parameters

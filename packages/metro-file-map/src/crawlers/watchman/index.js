@@ -26,8 +26,8 @@ import {RootPathUtils} from '../../lib/RootPathUtils';
 import {planQuery} from './planQuery';
 import watchman from 'fb-watchman';
 import invariant from 'invariant';
-import * as path from 'path';
-import {performance} from 'perf_hooks';
+import * as path from 'node:path';
+import {performance} from 'node:perf_hooks';
 
 type WatchmanRoots = Map<
   string, // Posix-separated absolute path
@@ -88,13 +88,15 @@ export default async function watchmanCrawl({
         command,
       });
     };
-    let intervalOrTimeoutId: TimeoutID | IntervalID = setTimeout(() => {
-      logWatchmanWaitMessage();
-      intervalOrTimeoutId = setInterval(
-        logWatchmanWaitMessage,
-        WATCHMAN_WARNING_INTERVAL_MILLISECONDS,
-      );
-    }, WATCHMAN_WARNING_INITIAL_DELAY_MILLISECONDS);
+    let intervalOrTimeoutId:
+      ReturnType<typeof setTimeout> | ReturnType<typeof setInterval> =
+      setTimeout(() => {
+        logWatchmanWaitMessage();
+        intervalOrTimeoutId = setInterval(
+          logWatchmanWaitMessage,
+          WATCHMAN_WARNING_INTERVAL_MILLISECONDS,
+        );
+      }, WATCHMAN_WARNING_INITIAL_DELAY_MILLISECONDS);
     try {
       const response = await new Promise<WatchmanQueryResponse>(
         (resolve, reject) =>

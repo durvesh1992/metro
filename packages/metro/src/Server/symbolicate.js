@@ -17,8 +17,8 @@ import type {
 import type {ExplodedSourceMap} from '../DeltaBundler/Serializers/getExplodedSourceMap';
 import type {ConfigT} from 'metro-config';
 
-import {toBabelSegments, toSegmentTuple} from 'metro-source-map';
 import {greatestLowerBound} from 'metro-source-map/private/Consumer/search';
+import LineIndexedMappings from 'metro-source-map/private/LineIndexedMappings';
 import {SourceMetadataMapConsumer} from 'metro-symbolicate/private/Symbolication';
 
 export type StackFrameInput = {
@@ -37,24 +37,73 @@ export type StackFrameOutput = Readonly<IntermediateStackFrame>;
 type ExplodedSourceMapModule = ExplodedSourceMap[number];
 type Position = {readonly line1Based: number, column0Based: number};
 
-function ensureDecodedMap(
+// Cache of per-line indices, keyed on the VlqMap held by the module graph. A
+// WeakMap lets an index outlive the request that built it, so later requests
+// resolving frames in the same module reuse it, and releases it automatically
+// when the module leaves the graph. The index references the graph's existing
+// mappings string and adds only O(lines) integers, so retaining it alongside
+// the graph stays cheap.
+const lineIndexCache: WeakMap<VlqMap, LineIndexedMappings> = new WeakMap();
+
+// Resolve a generated (line, column) within a module to its original position.
+// Tuple-backed modules keep their decoded segments, so we search them directly;
+// VLQ-backed modules go through a compact per-line `LineIndexedMappings` that
+// decodes only the target line. Byte-identical either way.
+function originalPositionInModule(
   map: Array<MetroSourceMapSegmentTuple> | VlqMap,
-  decodedMapCache: Map<VlqMap, Array<MetroSourceMapSegmentTuple>>,
-): Array<MetroSourceMapSegmentTuple> {
+  generatedLine1Based: number,
+  generatedColumn0Based: number,
+): ?Position {
   if (Array.isArray(map)) {
-    return map;
+    return originalPositionInTuples(
+      map,
+      generatedLine1Based,
+      generatedColumn0Based,
+    );
   }
-  let decoded = decodedMapCache.get(map);
+  let decoded = lineIndexCache.get(map);
   if (decoded == null) {
-    decoded = toBabelSegments({
-      version: 3,
-      sources: [''],
-      names: [...map.names],
-      mappings: map.mappings,
-    }).map(toSegmentTuple);
-    decodedMapCache.set(map, decoded);
+    decoded = new LineIndexedMappings(map.mappings);
+    lineIndexCache.set(map, decoded);
   }
-  return decoded;
+  return decoded.originalPositionFor(
+    generatedLine1Based,
+    generatedColumn0Based,
+  );
+}
+
+// greatestLowerBound over pre-decoded tuples, ordered by (line, column).
+function originalPositionInTuples(
+  mappings: Array<MetroSourceMapSegmentTuple>,
+  generatedLine1Based: number,
+  generatedColumn0Based: number,
+): ?Position {
+  const target = {
+    line1Based: generatedLine1Based,
+    column0Based: generatedColumn0Based,
+  };
+  const mappingIndex = greatestLowerBound(mappings, target, (t, candidate) => {
+    if (t.line1Based === candidate[0]) {
+      return t.column0Based - candidate[1];
+    }
+    return t.line1Based - candidate[0];
+  });
+  if (mappingIndex == null) {
+    return null;
+  }
+  const mapping = mappings[mappingIndex];
+  if (
+    mapping[0] !== target.line1Based ||
+    mapping.length < 4 /* no source line/column info */
+  ) {
+    return null;
+  }
+  return {
+    // $FlowFixMe[invalid-tuple-index]: Length checks do not refine tuple unions.
+    line1Based: mapping[2],
+    // $FlowFixMe[invalid-tuple-index]: Length checks do not refine tuple unions.
+    column0Based: mapping[3],
+  };
 }
 
 function createFunctionNameGetter(
@@ -98,13 +147,6 @@ export default async function symbolicate(
     (Position) => ?string,
   >();
 
-  // Decoded VLQ maps are cached only for the duration of this request, then
-  // discarded. The cache dedupes decoding across frames that resolve to the
-  // same module, while keeping the (large) decoded tuples short-lived — the
-  // VlqMaps themselves are retained by the long-lived module graph, so caching
-  // beyond request scope would defeat the memory savings of storing them as VLQ.
-  const decodedMapCache = new Map<VlqMap, Array<MetroSourceMapSegmentTuple>>();
-
   function findModule(frame: StackFrameInput): ?ExplodedSourceMapModule {
     const map = mapsByUrl.get(frame.file);
     if (!map || frame.lineNumber == null) {
@@ -130,37 +172,11 @@ export default async function symbolicate(
     if (module.map == null || lineNumber == null || column == null) {
       return null;
     }
-    const decodedMap = ensureDecodedMap(module.map, decodedMapCache);
-    const generatedPosInModule = {
-      line1Based: lineNumber - module.firstLine1Based + 1,
-      column0Based: column,
-    };
-    const mappingIndex = greatestLowerBound(
-      decodedMap,
-      generatedPosInModule,
-      (target, candidate) => {
-        if (target.line1Based === candidate[0]) {
-          return target.column0Based - candidate[1];
-        }
-        return target.line1Based - candidate[0];
-      },
+    return originalPositionInModule(
+      module.map,
+      lineNumber - module.firstLine1Based + 1,
+      column,
     );
-    if (mappingIndex == null) {
-      return null;
-    }
-    const mapping = decodedMap[mappingIndex];
-    if (
-      mapping[0] !== generatedPosInModule.line1Based ||
-      mapping.length < 4 /* no source line/column info */
-    ) {
-      return null;
-    }
-    return {
-      // $FlowFixMe[invalid-tuple-index]: Length checks do not refine tuple unions.
-      line1Based: mapping[2],
-      // $FlowFixMe[invalid-tuple-index]: Length checks do not refine tuple unions.
-      column0Based: mapping[3],
-    };
   }
 
   function findFunctionName(
